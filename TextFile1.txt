@@ -1,0 +1,1069 @@
+//using DocumentFormat.OpenXml.Bibliography;
+//using DocumentFormat.OpenXml.Drawing.Charts;
+//using DocumentFormat.OpenXml.Office2010.Excel;
+//using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
+//using DocumentFormat.OpenXml.Presentation;
+//using DocumentFormat.OpenXml.Spreadsheet;
+//using DocumentFormat.OpenXml.Wordprocessing;
+//using ExcelDataReader;
+//using Irony;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+//using System.Data.Common;
+//using System.Diagnostics;
+using System.Drawing;
+//using System.Drawing.Text;
+using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
+//using System.Linq.Expressions;
+//using System.Text;
+//using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Windows.Forms.DataVisualization.Charting;
+using Telegram.Bot;
+using Telegram.Bot.Exceptions;
+using Telegram.Bot.Polling;
+using Telegram.Bot.Types;
+using Message = Telegram.Bot.Types.Message;
+//using TempForms;
+
+namespace TempForms
+{
+
+    public partial class Form1 : Form
+    {
+        public Form1()
+        {
+            InitializeComponent();
+            string filePath = @"D:\trainplace\C#\repo\C_sharp_test\test.csv";
+            dataManager = new DataManager(filePath);
+
+            
+
+        }
+
+        private readonly DataManager dataManager;
+        //private readonly DayListManager daysList = new DayListManager();
+        private FigCheckListBoxManager figCheckListBoxManager = new FigCheckListBoxManager();
+        private DaysListBoxManager daysListBoxManager = new DaysListBoxManager();
+        private Operations operations = new Operations();
+        private TempBoundaryData tempData = new TempBoundaryData();
+        private Response tempResp = new Response();
+
+
+
+        //DataSet ds;
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+
+            // start for the checked list box initialisation
+            checkedListBox.Items.AddRange(daysListBoxManager.DaysArr);
+            opsCheckedListBox.Items.AddRange(operations.OpNames);
+            opsCheckedListBox.Refresh();
+            
+
+
+        }
+
+        private System.Data.DataTable TransposeDataTable(System.Data.DataTable inputTable)
+        {
+
+            List<string> stringList = daysListBoxManager.GetStringList();
+
+
+            // Find the "Day" column
+            DataColumn dayColumn = inputTable.Columns.Cast<DataColumn>()
+                                                    .FirstOrDefault(column => column.ColumnName.Equals("Day", StringComparison.OrdinalIgnoreCase));
+
+            System.Data.DataTable transposedDataTable = new System.Data.DataTable();
+            // Create a new DataTable for transposed data
+            transposedDataTable.Columns.Add("Time");
+            //transposedDataTable.Columns.Add("Temperature (°C)");
+
+            if (dayColumn != null)
+            {
+
+
+                foreach (string day in stringList)
+                {
+                    transposedDataTable.Columns.Add($"{day} (°C)");
+                }
+
+                // Filter the data according to string list
+
+
+                // Add columns for each time entry
+                foreach (DataColumn timeColumn in inputTable.Columns)
+                {
+                    if (timeColumn.ColumnName != dayColumn.ColumnName)
+                    {
+                        DataRow transposedRow = transposedDataTable.NewRow();
+                        transposedRow["Time"] = timeColumn.ColumnName;
+
+                        foreach (string day in stringList)
+                        {
+                            DataView dayDataView = new DataView(inputTable);
+                            dayDataView.RowFilter = $"{inputTable.Columns["Day"]} = '{day}'";
+                            transposedRow[$"{day} (°C)"] = dayDataView.Count > 0 ? dayDataView[0][timeColumn.ColumnName] : DBNull.Value;
+                        }
+
+
+                        transposedDataTable.Rows.Add(transposedRow);
+                    }
+                }
+
+            }
+            else
+            {
+                Console.WriteLine("The 'Day' column was not found in the DataTable.");
+            }
+
+            return transposedDataTable;
+        }
+
+
+        
+
+        //DaysListBox1
+        private void FigCheckListBox_ItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            figCheckListBoxManager.UpdateOnItemCheck(sender, e);
+        }
+
+
+        private void checkedListBox_ItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            daysListBoxManager.UpdateOnItemCheck(sender, e);
+        }
+
+        
+        private void clrButton1_Click(object sender, EventArgs e)
+        {
+            ResultGrid1.DataSource = null;
+            ResultGrid1.Rows.Clear();
+            ResultGrid1.Columns.Clear();
+            ResultGrid1.Refresh();
+
+            ResultsGrid2.DataSource = null;
+            ResultsGrid2.Rows.Clear();
+            ResultsGrid2.Columns.Clear();
+            ResultsGrid2.Refresh();
+
+
+            daysListBoxManager.GetStringList().ForEach(day =>
+            {
+                checkedListBox.SetItemChecked(checkedListBox.FindStringExact(day), false);
+            });
+
+            daysListBoxManager.Clear();
+
+
+            operations.GetStringList().ForEach(day =>
+            {
+                opsCheckedListBox.SetItemChecked(opsCheckedListBox.FindStringExact(day), false);
+            });
+
+            operations.Clear();
+
+
+
+            FigCheckListBox.Items.Clear();
+
+            TempVis.Series.Clear();
+            TempVis.Visible = false;
+
+
+
+            TempBoxUp.Text = string.Empty;
+            TempBoxLow.Text = string.Empty;
+            tempData.UpperBound = null;
+            tempData.LowerBound = null;
+
+
+            listBox1.Items.Clear();
+
+        }
+
+
+        //Analyses operations
+        private void opsCheckedListBox_ItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            CheckedListBox checkedListBox = (CheckedListBox)sender;
+            object selectedItem = checkedListBox.Items[e.Index];
+
+            if (selectedItem != null)
+            {
+                if (e.NewValue == CheckState.Checked)
+                {
+                    operations.AddString(selectedItem.ToString());
+                }
+                else
+                {
+                    operations.RemoveString(selectedItem.ToString());
+                }
+            }
+            
+        }
+
+        private void printList ()
+        {
+            foreach (var item in operations.GetStringList()) 
+            {
+                Console.WriteLine(item.ToString());
+            
+            }
+        }
+
+
+        //
+
+        private void updateButton1_Click(object sender, EventArgs e)
+        {
+            //refreshing all data
+            FigCheckListBox.Items.Clear();
+            //operations.Clear();
+
+            ResultGrid1.DataSource = null;
+            ResultGrid1.Rows.Clear();
+            ResultGrid1.Columns.Clear();
+            ResultGrid1.Refresh();
+
+            ResultsGrid2.DataSource = null;
+            ResultsGrid2.Rows.Clear();
+            ResultsGrid2.Columns.Clear();
+            ResultsGrid2.Refresh();
+
+
+            //logging the data & operations
+
+            System.Data.DataTable dataTable = dataManager.LoadDataTable();
+
+            // Display the transposed DataTable in the DataGridView
+            dataManager.TransposedTable = TransposeDataTable(dataTable);
+
+            //Operations go here **
+            operations.OperationsCaller(daysListBoxManager.GetStringList(), dataManager.TransposedTable);
+
+
+
+
+            //Visual presenters
+
+            foreach (var day in daysListBoxManager.GetStringList())
+            {
+                FigCheckListBox.Items.Add(day.ToString());
+            }
+
+            //default the fig legend checkboxes to be true
+            for (int i = 0; i < FigCheckListBox.Items.Count; i++)
+            {
+                FigCheckListBox.SetItemChecked(i, true);
+            }
+
+            listBox1.Items.Clear();
+
+            string res1 = tempData.UpperBound.HasValue ? Convert.ToString(tempData.UpperBound.Value) : "NULL";
+            string res2 = tempData.LowerBound.HasValue ? Convert.ToString(tempData.LowerBound.Value) : "NULL";
+
+            listBox1.Items.Add($"Upper temperature Value: {res1} (°C)");
+            listBox1.Items.Add($"Lower temperature Value: {res2} (°C)");
+
+            tempResp.SendMessageToTelegram("Hello World from Capstone Project!!!");
+
+
+
+
+
+
+            ResultsGrid2.DataSource =  operations.RetResultingData;
+
+
+
+            ResultGrid1.DataSource = dataManager.TransposedTable;
+            
+        }
+
+        private void graphButton1_Click(object sender, EventArgs e)
+        {
+            System.Data.DataTable dataTable = dataManager.TransposedTable;
+            TempVis.Series.Clear();
+            TempVis.Visible = true;
+            UpdateChart(dataTable);
+        }
+
+        private void UpdateChart(System.Data.DataTable transposedDataTable)
+        {
+            TempVis.Series.Clear();
+            double minYValue = double.MaxValue;
+            double maxYValue = double.MinValue;
+
+            List<string> selectedDays = figCheckListBoxManager.GetStringList();
+
+
+            foreach (string columnName in transposedDataTable.Columns.Cast<DataColumn>().Select(col => col.ColumnName))
+            {
+                //Console.WriteLine(columnName);
+                if (columnName != "Time" && selectedDays.Any(day => columnName.Contains(day)))
+                {
+                    //figCheckListBoxManager
+                    var series = new Series(columnName);
+                    series.ChartType = SeriesChartType.Line;
+
+                    foreach (DataRow row in transposedDataTable.Rows)
+                    {
+                        string time = row["Time"].ToString();
+                        double value;
+                        if (double.TryParse(row[columnName].ToString(), out value))
+                        {
+                            series.Points.AddXY(time, value);
+                            minYValue = Math.Min(minYValue, value);
+                            maxYValue = Math.Max(maxYValue, value);
+                        }
+                    }
+
+                    TempVis.Series.Add(series);
+                }
+            }
+
+            
+
+            // Add upper and lower boundary lines
+            if (tempData.UpperBound.HasValue || tempData.LowerBound.HasValue)
+            {
+                double? upperBound = null,   lowerBound = null ;
+
+                if (tempData.UpperBound.HasValue)
+                {
+                    upperBound = tempData.UpperBound.Value;
+                    var upperBoundSeries = new Series("Upper Bound");
+                    for (int i = 0; i < transposedDataTable.Rows.Count; i++)
+                    {
+                        string time = transposedDataTable.Rows[i]["Time"].ToString();
+                        upperBoundSeries.Points.AddXY(time, upperBound);
+                    }
+                    upperBoundSeries.ChartType = SeriesChartType.Line;
+                    upperBoundSeries.Color = System.Drawing.Color.DarkOrange; // You can change the color as needed
+                    TempVis.Series.Add(upperBoundSeries);
+                }
+
+                if (tempData.LowerBound.HasValue)
+                {
+                    lowerBound = tempData.LowerBound.Value;
+                    var lowerBoundSeries = new Series("Lower Bound");
+                    for (int i = 0; i < transposedDataTable.Rows.Count; i++)
+                    {
+                        string time = transposedDataTable.Rows[i]["Time"].ToString();
+                        lowerBoundSeries.Points.AddXY(time, lowerBound);
+                    }
+                    lowerBoundSeries.ChartType = SeriesChartType.Line;
+                    lowerBoundSeries.Color = System.Drawing.Color.Magenta; // You can change the color as needed
+                    TempVis.Series.Add(lowerBoundSeries);
+                }
+
+                // Set Y-axis range based on min and max values of temp data and boundary inputs
+                double axisPadding = 0.1; // You can adjust this value for padding
+
+                // using the null-coalescing operator (??)
+                double lbMin = Math.Min(minYValue, lowerBound ?? minYValue);
+                double lbMax = Math.Max(maxYValue, upperBound ?? maxYValue);
+
+
+                TempVis.ChartAreas[0].AxisY.Minimum = lbMin < 0 ? lbMin + (lbMin*axisPadding) : lbMin - (lbMin * axisPadding);
+
+                TempVis.ChartAreas[0].AxisY.Maximum = lbMax < 0 ? lbMax - (lbMax * axisPadding) : lbMax + (lbMax * axisPadding);
+            }
+            else
+            {
+                // Set Y-axis range based on min and max values of temp values 
+                double axisPadding = 0.1; // You can adjust this value for padding
+                TempVis.ChartAreas[0].AxisY.Minimum = minYValue < 0 ?  minYValue + (minYValue * axisPadding) : minYValue - (minYValue * axisPadding);
+                TempVis.ChartAreas[0].AxisY.Maximum = maxYValue < 0 ?  maxYValue - (maxYValue * axisPadding) : maxYValue + (maxYValue * axisPadding);
+            }
+
+            // Set legend properties
+            TempVis.Legends.Clear();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            legend.Docking = Docking.Bottom; // Set the legend to dock at the bottom
+            legend.Alignment = StringAlignment.Center; // Adjust this for more precise centering
+            TempVis.Legends.Add(legend);
+
+            // Set X-axis and Y-axis titles
+            TempVis.ChartAreas[0].AxisX.Title = "Time"; // Change this to your X-axis title
+            TempVis.ChartAreas[0].AxisY.Title = "Temperature , °C"; // Change this to your Y-axis title
+        }
+
+
+        // For textbox input & validation for any errors from user input
+        private void TempBox_TextChanged(object sender, EventArgs e)
+        {
+            TextBox textBox = (TextBox)sender;
+
+
+            if (textBox.Modified)
+            {
+                if (textBox.Tag != null)
+                {
+
+                    string textBoxTag = textBox.Tag.ToString();
+
+                    switch (textBoxTag)
+                    {
+                        case "upper":
+                            tempData.UpperBound = tempData.validationData(TempBoxUp.Text); break;
+
+                        case "lower":
+                            tempData.LowerBound = tempData.validationData(TempBoxLow.Text); break;
+                    }
+                }
+
+            }
+        }
+
+        private void TempBox_Validating(object sender, CancelEventArgs e)
+        {
+            TextBox textBox = (TextBox)sender;
+            
+            if (!System.Text.RegularExpressions.Regex.IsMatch(textBox.Text, "^[+-]?\\d*\\.?\\d+$") && !string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                errorProvider1.SetError(textBox, "Input can only be a floating number (e.g 3.1415).");
+                e.Cancel = true; // Cancel the event to prevent focus change
+            }
+            else if (tempData.UpperBound < tempData.LowerBound)
+            {
+                errorProvider1.SetError(textBox, "Upper Bound Temperature cannot be smaller than Lower Bound Temperature.");
+                e.Cancel = true; // Cancel the event to prevent focus change
+            }
+            else
+            {
+                errorProvider1.SetError(textBox, ""); // Clear the error if validation passes
+            }
+        }
+
+        private void ResultGrid1_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            object value = (sender as DataGridView).Rows[e.RowIndex].Cells[e.ColumnIndex].Value;
+
+            if ( value != DBNull.Value)
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex > 0)
+                {
+                    double cellValue = Convert.ToDouble(value);
+                    System.Drawing.Color defaultCellColor = System.Drawing.Color.White; 
+                    System.Drawing.Color cellColor;
+
+                    if (tempData.UpperBound.HasValue && tempData.LowerBound.HasValue)
+                    {
+                        double upperBound = tempData.UpperBound.Value;
+                        double lowerBound = tempData.LowerBound.Value;
+
+                        // Check if the cell value is within the bounds
+                        if (cellValue > lowerBound && cellValue < upperBound)
+                        {
+                            cellColor = System.Drawing.Color.Green;
+                        }
+                        else
+                        {
+                            cellColor = System.Drawing.Color.Red;
+                        }
+                    }
+                    else if (tempData.UpperBound.HasValue)
+                    {
+                        double upperBound = tempData.UpperBound.Value;
+
+                        cellColor = cellValue < upperBound ? System.Drawing.Color.Green : System.Drawing.Color.Red;
+                    }
+                    else if (tempData.LowerBound.HasValue)
+                    {
+                        double lowerBound = tempData.LowerBound.Value;
+
+                        cellColor = cellValue > lowerBound ? System.Drawing.Color.Green : System.Drawing.Color.Red;
+                    }
+                    else
+                    {
+                        // No bounds specified, set default color or handle accordingly
+                        cellColor = defaultCellColor;
+                    }
+
+                    ResultGrid1.Rows[e.RowIndex].Cells[e.ColumnIndex].Style.BackColor = cellColor;
+                    ResultGrid1.Rows[e.RowIndex].Cells[e.ColumnIndex].Style.ForeColor = System.Drawing.Color.Black;
+                }
+
+            }
+            else
+                ResultGrid1.Rows[e.RowIndex].Cells[e.ColumnIndex].Style.BackColor = System.Drawing.Color.Magenta;
+
+
+
+        }
+
+        private void toCSVButton1_Click(object sender, EventArgs e)
+        {
+            ToExcel expTable = new ToExcel(dataManager.TransposedTable);
+        }
+
+        
+    }
+
+    public class Response
+    {
+        //tele bot
+        private TelegramBotClient botClient;
+
+        public Response()
+        {
+            //bot client id
+            botClient = new TelegramBotClient("6748056760:AAEdgenrJv4UQY83LD3MwfEYEM-lXrVAGoU");
+        }
+
+        public async void SendMessageToTelegram(string message)
+        {
+            try
+            {
+                // Replace "CHAT_ID" with the actual chat ID where you want to send the message
+                long chatId = -4017861323;
+
+                // Send the message
+                await botClient.SendTextMessageAsync(chatId, message);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error sending message to Telegram: {ex.Message}");
+            }
+        }
+    }
+
+    public class ToExcel
+    {
+        private string filePath = @"D:\trainplace\C#\repo\C_sharp_test\answer.csv";
+
+        public ToExcel(DataTable dataTable)
+        {
+            // Create a StreamWriter to write to the CSV file
+            using (StreamWriter writer = new StreamWriter(filePath))
+            {
+                // Write the column headers
+                foreach (DataColumn column in dataTable.Columns)
+                {
+                    writer.Write(column.ColumnName);
+                    writer.Write(",");
+                }
+                writer.WriteLine(); // Move to the next line after writing headers
+
+                // Write the data rows
+                foreach (DataRow row in dataTable.Rows)
+                {
+                    foreach (object item in row.ItemArray)
+                    {
+                        writer.Write(item);
+                        writer.Write(",");
+                    }
+                    writer.WriteLine(); // Move to the next line after writing a row
+                }
+            }
+        }
+    }
+
+    public class TempBoundaryData
+    {
+        private double? upperBound , lowerBound ;
+
+        public double? UpperBound
+        {
+            get { return upperBound; }
+            set { upperBound = value; }
+        }
+
+        public double? LowerBound
+        {
+            get { return lowerBound; }
+            set { lowerBound = value; }
+        }
+
+        public double? validationData ( string input )
+        {
+            double? res = null;
+            if (!string.IsNullOrEmpty(input) && System.Text.RegularExpressions.Regex.IsMatch(input, "^[+-]?\\d*\\.?\\d+$"))
+                res = Convert.ToDouble(input);
+
+
+            return res;
+        }
+
+        
+
+    }
+
+    // class of operator functions
+   
+    public class Operations
+    {
+        private List<string> opList = new List<string>();
+        private readonly string[] opNames = new string[] { "AVERAGE" , "MINIMUM" , "MAXIMUM"};
+        private System.Data.DataTable filteredData = new System.Data.DataTable();
+        private System.Data.DataTable ResultingData = new System.Data.DataTable();
+
+
+
+        public Operations()
+        {
+            // Initialize the private list
+            opList = new List<string>();
+        }
+
+        // Actual Analyses Operations functions : START
+
+        public void OperationsCaller(List<string> strList, System.Data.DataTable dataTable)
+        {
+            DataFilter(strList, dataTable); // strList -> days checked  ; dataTable -> truncated table
+            NewTableCreation();
+
+            foreach(string obj in opList)
+            {
+                switch(obj) 
+                {
+                    case "AVERAGE":
+                        AverageOp();
+                        break;
+
+                    case "MINIMUM":
+                        MinOp();
+                        break;
+
+                    case "MAXIMUM":
+                        MaxOp();
+                        break;
+                }
+            }
+
+
+        }
+
+        private void DataFilter( List<string> strList , System.Data.DataTable dataTable ) //must pass in truncated data
+        {
+            System.Data.DataTable filteredData = new System.Data.DataTable();
+
+            foreach (string columnName in dataTable.Columns.Cast<DataColumn>().Select(col => col.ColumnName))
+            {
+                if (columnName != "Time" && strList.Any(day => columnName.Contains(day)))
+                {
+                    filteredData.Columns.Add(columnName, typeof(double));
+                }
+            }
+
+            // Add rows with temperature values for each time
+            foreach (DataRow row in dataTable.Rows)
+            {
+                DataRow newRow = filteredData.NewRow();
+
+                foreach (string columnName in filteredData.Columns.Cast<DataColumn>().Select(col => col.ColumnName))
+                {
+                    if (row[columnName] != DBNull.Value)
+                        newRow[columnName] = Convert.ToDouble(row[columnName]);
+                }
+
+                filteredData.Rows.Add(newRow);
+            }
+
+            this.filteredData = filteredData;
+
+        }
+
+        private void NewTableCreation () //it is filtered Data
+        {
+            System.Data.DataTable newTable = new System.Data.DataTable();
+
+            // Add a single row with columns for each selected day in the averagesTable
+            newTable.Columns.Add("Operations", typeof(string));
+
+            foreach (DataColumn column in filteredData.Columns)
+            {
+                if (column.ColumnName != "Time")
+                {
+                    newTable.Columns.Add(column.ColumnName, typeof(double));
+                }
+
+            }
+
+            ResultingData = newTable;
+
+        }
+
+        private void AverageOp ()
+        {
+            // Add a single row with columns for each selected day in the averagesTable
+            DataRow averagesRow = ResultingData.NewRow();
+            foreach (DataColumn column in filteredData.Columns)
+            {
+                if (column.ColumnName != "Time")
+                {
+                    double sum = 0;
+                    int count = 0;
+
+                    foreach (DataRow row in filteredData.Rows)
+                    {
+                        if (row[column] != DBNull.Value)
+                        {
+                            sum += Convert.ToDouble(row[column]);
+                            count++;
+                        }
+                    }
+
+                    // Calculate and add the average to the averagesRow
+                    double average = count > 0 ? Math.Round(sum / count, 2) : 0;
+                    averagesRow[column.ColumnName] = average;
+                }
+            }
+
+            // Add the averagesRow to the averagesTable
+            averagesRow["Operations"] = "AVERAGE";
+            ResultingData.Rows.Add(averagesRow);
+
+        }
+
+        private void MinOp()
+        {
+
+            // Add a single row with columns for each selected day in the averagesTable
+            DataRow minValRow = ResultingData.NewRow();
+            foreach (DataColumn column in filteredData.Columns)
+            {
+                if (column.ColumnName != "Time")
+                {
+                    double resMin = double.MaxValue;
+
+                    foreach (DataRow row in filteredData.Rows)
+                    {
+                        if (row[column] != DBNull.Value)
+                        {
+                            double currValue = Convert.ToDouble(row[column]);
+                            resMin = Math.Min(currValue, resMin);
+                        }
+                    }
+
+                    minValRow[column.ColumnName] = resMin;
+                }
+            }
+
+            // Add the minValRow to the minTable
+            minValRow["Operations"] = "MINIMUM";
+            ResultingData.Rows.Add(minValRow);
+
+        }
+
+        private void MaxOp()
+        {
+            // Add a single row with columns for each selected day in the averagesTable
+            DataRow maxValRow = ResultingData.NewRow();
+            foreach (DataColumn column in filteredData.Columns)
+            {
+                if (column.ColumnName != "Time")
+                {
+                    double resMax = double.MinValue;
+
+                    foreach (DataRow row in filteredData.Rows)
+                    {
+                        if (row[column] != DBNull.Value)
+                        {
+                            double currValue = Convert.ToDouble(row[column]);
+                            resMax = Math.Max(currValue, resMax);
+                        }
+                    }
+
+                    maxValRow[column.ColumnName] = Math.Round(resMax, 2);
+                }
+            }
+
+            // Add the minValRow to the minTable
+            maxValRow["Operations"] = "MAXIMUM";
+            ResultingData.Rows.Add(maxValRow);
+
+        }
+
+        // Actual Analyses Operations functions : END
+
+        public List<string> GetStringList()
+        {
+            // Return a copy of the string list to prevent external modification
+            return new List<string>(opList);
+        }
+
+        public string[] OpNames
+        {
+            get { return opNames; }
+        }
+
+        public System.Data.DataTable RetResultingData
+        {
+            get { return ResultingData; }
+        }
+
+        public void AddString(string day)
+        {
+            if (!opList.Contains(day))
+            {
+                opList.Add(day);
+                SortSelectedOps();
+            }
+        }
+
+        public void RemoveString(string newString)
+        {
+            // removing string from the list
+            opList.Remove(newString);
+        }
+
+
+
+        public void Clear()
+        {
+            opList.Clear();
+        }
+
+        
+
+        private void SortSelectedOps()
+        {
+            // Sort the ops based on the order of "AVERAGE" , "MINIMUM" , "MAXIMUM"
+            opList.Sort((op1, op2) => Array.IndexOf(opNames, op1).CompareTo(Array.IndexOf(opNames, op2)));
+        }
+
+        
+
+
+    }
+
+    // end for operator functions
+    public class DataManager
+    {
+        private readonly string filePath;
+        private System.Data.DataTable transposedTable;
+
+        public DataManager(string filePath)
+        {
+            this.filePath = filePath;
+            //string[] daysArr = new string[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+
+
+            //System.Data.DataTable dataTable = new System.Data.DataTable();
+
+            //try
+            //{
+            //    using (StreamReader reader = new StreamReader(filePath))
+            //    {
+            //        // Read the first line of the CSV file to get the column names
+            //        string[] columnNames = reader.ReadLine().Split(',');
+            //        foreach (string columnName in columnNames)
+            //        {
+            //            dataTable.Columns.Add(columnName);
+            //        }
+            //        while (!reader.EndOfStream)
+            //        {
+            //            string[] fields = reader.ReadLine().Split(',');
+            //            for (int i = 0; i < fields.Length; i++)
+            //            {
+            //                if (!System.Text.RegularExpressions.Regex.IsMatch(fields[i], "^[+-]?\\d*\\.?\\d+$") && !daysArr.Contains(fields[i]))
+            //                {
+            //                    throw new InvalidValue("bad temperature data");
+            //                }
+            //            }
+            //        }
+            //    }
+            //}
+            //catch (FormatException ex) 
+            //{
+            //    Console.WriteLine($"Exception caught : {ex.Message}");
+            //}
+            //catch (InvalidValue ex)
+            //{
+            //    Console.WriteLine($"Exception caught : {ex.Message}");
+            //}
+
+
+
+
+
+        }
+
+        
+
+        public System.Data.DataTable LoadDataTable()
+        {
+            System.Data.DataTable dataTable = new System.Data.DataTable();
+            string[] daysArr = new string[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+
+            using (StreamReader reader = new StreamReader(filePath))
+            {
+                // Read the first line of the CSV file to get the column names
+                string[] columnNames = reader.ReadLine().Split(',');
+                foreach (string columnName in columnNames)
+                {
+                    dataTable.Columns.Add(columnName);
+                }
+                while (!reader.EndOfStream)
+                {
+                    string[] fields = reader.ReadLine().Split(',');
+                    DataRow dataRow = dataTable.NewRow();
+                    for (int i = 0; i < fields.Length; i++)
+                    {
+                        if (!System.Text.RegularExpressions.Regex.IsMatch(fields[i], "^[+-]?\\d*\\.?\\d+$") && !daysArr.Contains(fields[i]))
+                            dataRow[i] = DBNull.Value;
+                        else 
+                            dataRow[i] = fields[i];
+                    }
+                    dataTable.Rows.Add(dataRow);
+                }
+            }
+
+            return dataTable;
+        }
+
+        public System.Data.DataTable TransposedTable
+        {
+            get { return transposedTable; }
+            set { transposedTable = value; }
+        }
+
+        class InvalidValue : Exception //rely on the mother, make use of base exception
+
+        {
+
+            public InvalidValue() : base("Enter your own message")
+            {
+
+            }
+
+            public InvalidValue(string message) : base(message)
+            {
+
+            }
+        }
+
+
+
+    }
+
+    public class DayListManager
+    {
+        protected List<string> stringList = new List<string>();
+        // For ref of order
+        protected readonly string[] daysArr = new string[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+
+        public DayListManager()
+        {
+            // Initialize the private list
+            stringList = new List<string>();
+        }
+
+        public List<string> GetStringList()
+        {
+            // Return a copy of the string list to prevent external modification
+            return new List<string>(stringList);
+        }
+
+        public void AddString(string day)
+        {
+            if (!stringList.Contains(day))
+            {
+                stringList.Add(day);
+                SortSelectedDays();
+            }
+        }
+
+        public void RemoveString(string newString)
+        {
+            // removing string from the list
+            stringList.Remove(newString);
+        }
+
+
+
+        public void Clear()
+        {
+            stringList.Clear();
+        }
+
+        //getter for daysArr
+        public string[] DaysArr
+        {
+            get { return daysArr; }
+        }
+
+        private void SortSelectedDays()
+        {
+            // Sort the selected days based on the order of Monday to Sunday
+            stringList.Sort((day1, day2) => Array.IndexOf(daysArr, day1).CompareTo(Array.IndexOf(daysArr, day2)));
+        }
+
+
+
+    }
+
+    public class FigCheckListBoxManager : DayListManager
+    {
+        public FigCheckListBoxManager()
+        {
+            // Initialize the private list
+            stringList = new List<string>();
+        }
+
+        public void UpdateOnItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            CheckedListBox checkedListBox = (CheckedListBox)sender;
+            object selectedItem = checkedListBox.Items[e.Index];
+            if (selectedItem != null )
+            {
+                if (e.NewValue == CheckState.Checked)
+                {
+                    AddString(selectedItem.ToString());
+                }
+                else
+                {
+                    RemoveString(selectedItem.ToString());
+                }
+            }
+            
+        }
+    }
+
+    public class DaysListBoxManager : DayListManager
+    {
+        public DaysListBoxManager()
+        {
+            // Initialize the private list
+            stringList = new List<string>();
+        }
+
+        public void UpdateOnItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            CheckedListBox checkedListBox = (CheckedListBox)sender;
+            object selectedItem = checkedListBox.Items[e.Index];
+
+            if (selectedItem != null)
+            {
+                if (e.NewValue == CheckState.Checked)
+                {
+                    AddString(selectedItem.ToString());
+                }
+                else
+                {
+                    RemoveString(selectedItem.ToString());
+                }
+            }
+                
+
+            
+        }
+    }
+
+
+
+}
+
+
+
+
